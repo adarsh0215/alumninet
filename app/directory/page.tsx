@@ -1,7 +1,3 @@
-// app/directory/page.tsx
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -9,7 +5,6 @@ import Image from "next/image";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
-import { getAvatarUrl } from "@/lib/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,9 +31,11 @@ type Row = {
 const PAGE_SIZE = 20;
 
 export default function DirectoryPage() {
+  const supabase = supabaseBrowser();
+
   // Filters / UI state
   const [q, setQ] = useState<string>("");
-  const [degree, setDegree] = useState<string>("any"); // "any" = no filter
+  const [degree, setDegree] = useState<string>("any");
   const [branch, setBranch] = useState<string>("any");
   const [year, setYear] = useState<string>("");
   const [page, setPage] = useState<number>(1);
@@ -53,25 +50,11 @@ export default function DirectoryPage() {
     []
   );
   const branchOptions = useMemo(
-    () => [
-      "CSE",
-      "ECE",
-      "EEE",
-      "IT",
-      "Mechanical",
-      "Civil",
-      "Chemical",
-      "AI/ML",
-      "Data Science",
-      "Other",
-    ],
+    () => ["CSE", "ECE", "EEE", "IT", "Mechanical", "Civil", "Chemical", "AI/ML", "Data Science", "Other"],
     []
   );
 
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(count / PAGE_SIZE)),
-    [count]
-  );
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(count / PAGE_SIZE)), [count]);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
@@ -79,9 +62,6 @@ export default function DirectoryPage() {
     err instanceof Error ? err.message : "Unexpected error";
 
   const fetchDirectory = useCallback(async () => {
-    // Create the client only on the client, when we fetch
-    const supabase = supabaseBrowser();
-
     try {
       setLoading(true);
 
@@ -131,9 +111,8 @@ export default function DirectoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [branch, degree, from, q, to, year]);
+  }, [branch, degree, from, q, supabase, to, year]);
 
-  // Fetch on mount & whenever filters/page change
   useEffect(() => {
     void fetchDirectory();
   }, [fetchDirectory]);
@@ -154,7 +133,6 @@ export default function DirectoryPage() {
       <Card className="mt-6">
         <CardContent className="pt-6">
           <div className="grid gap-3 md:grid-cols-4">
-            {/* Search */}
             <Input
               placeholder="Search name, company, role, location"
               value={q}
@@ -166,7 +144,6 @@ export default function DirectoryPage() {
               aria-label="Search alumni"
             />
 
-            {/* Degree */}
             <Select
               value={degree}
               onValueChange={(val) => {
@@ -187,7 +164,6 @@ export default function DirectoryPage() {
               </SelectContent>
             </Select>
 
-            {/* Branch */}
             <Select
               value={branch}
               onValueChange={(val) => {
@@ -208,7 +184,6 @@ export default function DirectoryPage() {
               </SelectContent>
             </Select>
 
-            {/* Year */}
             <Input
               type="number"
               inputMode="numeric"
@@ -242,7 +217,7 @@ export default function DirectoryPage() {
                 <div className="h-12 w-12 overflow-hidden rounded-full bg-muted">
                   {r.avatar_url ? (
                     <Image
-                      src={getAvatarUrl(r.avatar_url)}
+                      src={r.avatar_url}
                       alt={r.full_name ?? "Avatar"}
                       width={48}
                       height={48}
