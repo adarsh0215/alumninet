@@ -1,3 +1,4 @@
+// app/onboarding/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -15,41 +16,29 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-function Required({ children }: { children: string }) {
-  return (
-    <span>
-      {children} <span className="text-destructive">*</span>
-    </span>
-  );
-}
-
 export default function OnboardingPage() {
   const router = useRouter();
-  const [authEmail, setAuthEmail] = useState<string>("");
+  const supabase = supabaseBrowser();
+  const [email, setEmail] = useState<string>("");
 
+  // Prefill email (read-only display)
   useEffect(() => {
     (async () => {
-      const supabase = supabaseBrowser();
       const { data, error } = await supabase.auth.getUser();
-      if (error) {
-        toast.error("Failed to load your session. Please login again.");
-        return;
-      }
-      setAuthEmail(data.user?.email ?? "");
+      if (error) return;
+      setEmail(data.user?.email ?? "");
     })();
-  }, []);
+  }, [supabase]);
 
-  // Cast to quiet minor resolver type mismatches across versions
   const resolver = zodResolver(onboardingSchema) as unknown as Resolver<OnboardingForm>;
-
   const form = useForm<OnboardingForm>({
     resolver,
     defaultValues: {
       full_name: "",
       phone: "",
-      graduation_year: new Date().getFullYear(),
       degree: "",
       branch: "",
+      graduation_year: new Date().getFullYear(),
       company: "",
       job_role: "",
       location: "",
@@ -58,9 +47,8 @@ export default function OnboardingPage() {
       consent_terms: false,
       consent_privacy: false,
     },
-    mode: "onChange",
-    reValidateMode: "onChange",
-    criteriaMode: "firstError",
+    mode: "onSubmit",
+    reValidateMode: "onBlur",
   });
 
   // Options
@@ -73,62 +61,47 @@ export default function OnboardingPage() {
     []
   );
 
-  // Watch required fields to control disabled state
-  const fullName = form.watch("full_name");
-  const degree = form.watch("degree");
-  const branch = form.watch("branch");
-  const grad = form.watch("graduation_year");
-  const acceptTerms = form.watch("consent_terms");
-  const acceptPrivacy = form.watch("consent_privacy");
-
-  const gradValid = grad !== undefined && grad !== null && !Number.isNaN(Number(grad));
-  const requiredIncomplete =
-    fullName.trim().length < 2 ||
-    degree.trim().length === 0 ||
-    branch.trim().length === 0 ||
-    !gradValid ||
-    !acceptTerms ||
-    !acceptPrivacy;
-
   const onSubmit: SubmitHandler<OnboardingForm> = async (values) => {
-    if (requiredIncomplete) {
-      toast.error("Please fill all required fields and accept the consents");
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      toast.error("You must be logged in to complete onboarding");
       return;
     }
 
-    const supabase = supabaseBrowser();
-    try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+    const { error } = await supabase.from("profiles").upsert({
+      id: user.id,
+      email: user.email ?? null,
+      ...values,
+      full_name: values.full_name.trim(),
+      degree: values.degree.trim(),
+      branch: values.branch.trim(),
+      onboarded: true,
+      // explicitly mark pending for admin review (even though DB has a default)
+      moderation_status: "pending",
+    });
 
-      if (userError || !user) {
-        toast.error("You must be logged in to complete onboarding");
-        return;
-      }
-
-      const { error } = await supabase.from("profiles").upsert({
-        id: user.id,
-        email: user.email, // auto-store email
-        ...values,
-        full_name: values.full_name.trim(),
-        degree: values.degree.trim(),
-        branch: values.branch.trim(),
-        onboarded: true,
-      });
-
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-
-      toast.success("Onboarding complete!");
-      router.push("/dashboard");
-    } catch (e: any) {
-      toast.error(e?.message || "Unexpected error while saving your profile");
+    if (error) {
+      toast.error(error.message);
+      return;
     }
+
+    toast.success("Onboarding complete! Your profile is pending approval.");
+    router.push("/dashboard");
   };
+
+  // 🔧 Use 'watch' so the button state updates live
+  const w = form.watch(); // subscribes to all fields; causes re-render on change
+  const requiredIncomplete =
+    !w.full_name?.trim() ||
+    !w.degree?.trim() ||
+    !w.branch?.trim() ||
+    !Number.isFinite(Number(w.graduation_year)) ||
+    !w.consent_terms ||
+    !w.consent_privacy;
 
   const isSaving = form.formState.isSubmitting;
 
@@ -141,33 +114,28 @@ export default function OnboardingPage() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              {/* Read-only email from session */}
-              <FormItem>
+              {/* Email (read-only) */}
+              <div>
                 <FormLabel>Email</FormLabel>
-                <FormControl>
-                  <Input value={authEmail} disabled readOnly />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
+                <Input value={email} readOnly />
+              </div>
 
-              {/* Full name (required) */}
+              {/* Full Name */}
               <FormField
                 control={form.control}
                 name="full_name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      <Required>Full Name</Required>
-                    </FormLabel>
+                    <FormLabel>Full Name *</FormLabel>
                     <FormControl>
-                      <Input placeholder="Your full name" {...field} aria-required />
+                      <Input placeholder="Your full name" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              {/* Phone (optional) */}
+              {/* Phone */}
               <FormField
                 control={form.control}
                 name="phone"
@@ -182,15 +150,73 @@ export default function OnboardingPage() {
                 )}
               />
 
-              {/* Graduation Year (required) */}
+              {/* Degree */}
+              <FormField
+                control={form.control}
+                name="degree"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Degree *</FormLabel>
+                    <Select
+                      value={field.value || "any"}
+                      onValueChange={(val) => field.onChange(val === "any" ? "" : val)}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select degree" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="any">Select Degree</SelectItem>
+                        {degreeOptions.map((d) => (
+                          <SelectItem key={d} value={d}>
+                            {d}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Branch */}
+              <FormField
+                control={form.control}
+                name="branch"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Branch *</FormLabel>
+                    <Select
+                      value={field.value || "any"}
+                      onValueChange={(val) => field.onChange(val === "any" ? "" : val)}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select branch" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="any">Select Branch</SelectItem>
+                        {branchOptions.map((b) => (
+                          <SelectItem key={b} value={b}>
+                            {b}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Graduation Year */}
               <FormField
                 control={form.control}
                 name="graduation_year"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      <Required>Graduation Year</Required>
-                    </FormLabel>
+                    <FormLabel>Graduation Year *</FormLabel>
                     <FormControl>
                       <Input
                         type="number"
@@ -198,7 +224,6 @@ export default function OnboardingPage() {
                         placeholder="2022"
                         value={field.value?.toString() ?? ""}
                         onChange={(e) => field.onChange(e.target.value)}
-                        aria-required
                       />
                     </FormControl>
                     <FormMessage />
@@ -206,71 +231,7 @@ export default function OnboardingPage() {
                 )}
               />
 
-              {/* Degree (required) - shadcn Select using "any" */}
-              <FormField
-                control={form.control}
-                name="degree"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>
-                      <Required>Degree</Required>
-                    </FormLabel>
-                    <Select
-                      value={field.value || "any"}
-                      onValueChange={(val) => field.onChange(val === "any" ? "" : val)}
-                    >
-                      <FormControl>
-                        <SelectTrigger aria-required>
-                          <SelectValue placeholder="Select degree" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="any">Select Degree</SelectItem>
-                        {degreeOptions.map((opt) => (
-                          <SelectItem key={opt} value={opt}>
-                            {opt}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {/* Branch (required) - shadcn Select using "any" */}
-              <FormField
-                control={form.control}
-                name="branch"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>
-                      <Required>Branch</Required>
-                    </FormLabel>
-                    <Select
-                      value={field.value || "any"}
-                      onValueChange={(val) => field.onChange(val === "any" ? "" : val)}
-                    >
-                      <FormControl>
-                        <SelectTrigger aria-required>
-                          <SelectValue placeholder="Select branch" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="any">Select Branch</SelectItem>
-                        {branchOptions.map((opt) => (
-                          <SelectItem key={opt} value={opt}>
-                            {opt}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {/* Optional fields */}
+              {/* Company */}
               <FormField
                 control={form.control}
                 name="company"
@@ -284,6 +245,7 @@ export default function OnboardingPage() {
                 )}
               />
 
+              {/* Job Role */}
               <FormField
                 control={form.control}
                 name="job_role"
@@ -297,6 +259,7 @@ export default function OnboardingPage() {
                 )}
               />
 
+              {/* Location */}
               <FormField
                 control={form.control}
                 name="location"
@@ -310,6 +273,7 @@ export default function OnboardingPage() {
                 )}
               />
 
+              {/* LinkedIn */}
               <FormField
                 control={form.control}
                 name="linkedin"
@@ -324,6 +288,7 @@ export default function OnboardingPage() {
                 )}
               />
 
+              {/* Avatar URL */}
               <FormField
                 control={form.control}
                 name="avatar_url"
@@ -347,9 +312,7 @@ export default function OnboardingPage() {
                       <Checkbox checked={field.value} onCheckedChange={field.onChange} />
                     </FormControl>
                     <div>
-                      <FormLabel>
-                        <Required>I accept the Terms & Conditions</Required>
-                      </FormLabel>
+                      <FormLabel>I accept the Terms & Conditions *</FormLabel>
                       <FormMessage />
                     </div>
                   </FormItem>
@@ -364,16 +327,18 @@ export default function OnboardingPage() {
                       <Checkbox checked={field.value} onCheckedChange={field.onChange} />
                     </FormControl>
                     <div>
-                      <FormLabel>
-                        <Required>I accept the Privacy Policy</Required>
-                      </FormLabel>
+                      <FormLabel>I accept the Privacy Policy *</FormLabel>
                       <FormMessage />
                     </div>
                   </FormItem>
                 )}
               />
 
-              <Button type="submit" className="w-full" disabled={requiredIncomplete || isSaving}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={requiredIncomplete || isSaving}
+              >
                 {isSaving ? "Saving..." : "Complete Onboarding"}
               </Button>
             </form>

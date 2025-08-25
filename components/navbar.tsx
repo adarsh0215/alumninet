@@ -1,86 +1,135 @@
-// components/navbar.tsx
+"use client";
+
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { supabaseServer } from "@/lib/supabase/server";
+import { useEffect, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import UserPill from "@/components/user-pill";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { toast } from "sonner";
 
-export default async function Navbar() {
-  const supabase = await supabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+type Me = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+};
 
-  let fullName: string | null = null;
+export default function Navbar() {
+  const [me, setMe] = useState<Me | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", user.id)
-      .maybeSingle();
-    fullName = profile?.full_name ?? null;
-  }
+  useEffect(() => {
+    (async () => {
+      const supabase = supabaseBrowser();
 
-  // Server Action for sign-out
-  async function signOut(_: FormData) {
-    "use server";
-    const sb = await supabaseServer();
-    await sb.auth.signOut();
-    redirect("/");
+      // get session user
+      const { data: ures } = await supabase.auth.getUser();
+      const user = ures?.user;
+      if (!user) {
+        setMe(null);
+        setLoading(false);
+        return;
+      }
+
+      // fetch a tiny profile preview
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      setMe({
+        id: user.id,
+        email: user.email ?? null,
+        full_name: profile?.full_name ?? null,
+        avatar_url: profile?.avatar_url ?? null,
+      });
+      setLoading(false);
+    })();
+  }, []);
+
+  async function signOut() {
+    const supabase = supabaseBrowser();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    // Hard reload to clear any client state quickly
+    window.location.href = "/";
   }
 
   return (
-    <header className="border-b bg-background">
+    <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
-        {/* Left: brand + primary nav */}
-        <div className="flex items-center gap-6">
+        {/* Left: Brand + nav */}
+        <div className="flex items-center gap-4">
           <Link href="/" className="font-semibold">
             AlumniNet
           </Link>
-          <nav className="hidden gap-4 sm:flex">
-            <Link
-              href="/"
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              Home
-            </Link>
-            <Link
-              href="/directory"
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              Directory
-            </Link>
-            {user && (
-              <Link
-                href="/dashboard"
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                Dashboard
-              </Link>
-            )}
+          <nav className="hidden items-center gap-4 md:flex text-sm">
+            <Link href="/" className="hover:underline">Home</Link>
+            <Link href="/directory" className="hover:underline">Directory</Link>
+            {me && <Link href="/dashboard" className="hover:underline">Dashboard</Link>}
           </nav>
         </div>
 
-        {/* Right: auth controls */}
-        <div className="flex items-center gap-3">
-          {!user ? (
+        {/* Right: auth */}
+        <div className="flex items-center gap-2">
+          {!loading && !me && (
             <>
               <Link href="/auth/login">
-                <Button variant="ghost" size="sm">
-                  Login
-                </Button>
+                <Button variant="ghost" size="sm">Login</Button>
               </Link>
               <Link href="/auth/signup">
                 <Button size="sm">Sign Up</Button>
               </Link>
             </>
-          ) : (
-            <UserPill
-              name={fullName ?? undefined}
-              email={user.email ?? undefined}
-              signOutAction={signOut}
-            />
+          )}
+
+          {!loading && me && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted">
+                  <Avatar className="h-7 w-7">
+                    {me.avatar_url ? (
+                      <AvatarImage src={me.avatar_url} alt={me.full_name ?? "Avatar"} />
+                    ) : (
+                      <AvatarFallback>
+                        {(me.full_name ?? me.email ?? "U").slice(0, 1).toUpperCase()}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
+                  <span className="hidden text-sm md:block max-w-[160px] truncate">
+                    {me.full_name ?? me.email ?? "User"}
+                  </span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="truncate">
+                  {me.full_name ?? me.email ?? "User"}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/dashboard">Dashboard</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/onboarding">Edit profile</Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={signOut} className="text-destructive">
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>
