@@ -1,56 +1,55 @@
+// components/dashboard/approval-banner.tsx
 "use client";
 
-import Link from "next/link";
-import { AlertCircle, Hourglass, XCircle } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Info } from "lucide-react"; // simple icon, small footprint
+import { cn } from "@/lib/utils";
 
-interface Props {
-  moderationStatus: "pending" | "approved" | "rejected";
+type Moderation = "pending" | "approved" | "rejected";
+
+export default function ApprovalBanner({
+  moderationStatus,
+  moderationReason,
+  className,
+}: {
+  moderationStatus: Moderation;
   moderationReason?: string | null;
-}
-
-/**
- * Inline dashboard banner:
- * - hidden if approved
- * - shows info if pending/rejected
- */
-export default function ApprovalBanner({ moderationStatus, moderationReason }: Props) {
+  className?: string;
+}) {
   if (moderationStatus === "approved") return null;
 
-  if (moderationStatus === "pending") {
-    return (
-      <Alert>
-        <Hourglass className="h-4 w-4" />
-        <AlertTitle>Waiting for Approval</AlertTitle>
-        <AlertDescription>
-          Your profile is under review by admins. Once approved, you’ll unlock
-          full access to the alumni directory.
-        </AlertDescription>
-      </Alert>
-    );
-  }
+  const isRejected = moderationStatus === "rejected";
 
-  if (moderationStatus === "rejected") {
-    return (
-      <Alert variant="destructive">
-        <XCircle className="h-4 w-4" />
-        <AlertTitle>Profile Rejected</AlertTitle>
-        <AlertDescription>
-          Unfortunately your profile was rejected.
-          {moderationReason && (
-            <div className="mt-1">Reason: {moderationReason}</div>
-          )}
-          <div className="mt-2">
-            <Link href="/onboarding" className="underline">
-              Update your profile
-            </Link>{" "}
-            and resubmit.
-          </div>
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  // Fallback: show nothing
-  return null;
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-3 rounded-md border px-4 py-3",
+        isRejected
+          ? "border-destructive/30 bg-destructive/10 text-destructive"
+          : "border-yellow-300/40 bg-yellow-100/50 text-yellow-900",
+        className
+      )}
+      role="status"
+      aria-live="polite"
+    >
+      <Info className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="text-sm">
+        {isRejected ? (
+          <>
+            <strong>Application Rejected.</strong>{" "}
+            {moderationReason ? (
+              <span>Reason: {moderationReason}</span>
+            ) : (
+              <span>Please update your profile and resubmit.</span>
+            )}
+          </>
+        ) : (
+          <>
+            <strong>Waiting for approval.</strong>{" "}
+            You’ll get access to the directory once an admin approves your
+            profile.
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
