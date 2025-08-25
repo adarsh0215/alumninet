@@ -32,12 +32,11 @@ type ProfileRow = {
 export default async function DashboardPage() {
   const supabase = await supabaseServer();
 
-  // Auth (middleware should enforce, but we fail-safe here)
-  const userRes = await supabase.auth.getUser();
-  const user = userRes.data.user;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login?redirect=/dashboard");
 
-  // Load profile (explicit typing so TS is happy)
   const profRes = await supabase
     .from("profiles")
     .select(
@@ -61,31 +60,21 @@ export default async function DashboardPage() {
     .eq("id", user.id)
     .maybeSingle();
 
-  // Cast data to our typed row (Supabase types can be loose here)
   const profile = (profRes.data ?? null) as ProfileRow | null;
+  if (!profile) redirect("/onboarding");
 
-  // If profile is missing (shouldn’t happen after onboarding), nudge back
-  if (!profile) {
-    redirect("/onboarding");
-  }
-
-  const name =
-    profile.full_name?.trim() || user.email?.split("@")[0] || "there";
-  const moderationStatus: Moderation =
-    profile.moderation_status ?? "pending";
+  const name = profile.full_name?.trim() || user.email?.split("@")[0] || "there";
+  const moderationStatus: Moderation = profile.moderation_status ?? "pending";
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
-      {/* Greeting */}
       <h1 className="text-2xl md:text-3xl font-semibold">Welcome, {name} 👋</h1>
 
-      {/* Inline approval banner (hidden when approved) */}
       <ApprovalBanner
         moderationStatus={moderationStatus}
         moderationReason={profile.moderation_reason}
       />
 
-      {/* Profile Summary */}
       <Card>
         <CardHeader className="flex items-center justify-between gap-2 flex-row">
           <CardTitle>Your Profile</CardTitle>
@@ -95,22 +84,22 @@ export default async function DashboardPage() {
         </CardHeader>
 
         <CardContent className="grid gap-3 md:grid-cols-2">
-          <ProfileRowView label="Email" value={profile.email || user.email || "—"} />
-          <ProfileRowView label="Full Name" value={profile.full_name || "—"} />
-          <ProfileRowView label="Phone" value={profile.phone || "—"} />
+          <Row label="Email" value={profile.email || user.email || "—"} />
+          <Row label="Full Name" value={profile.full_name || "—"} />
+          <Row label="Phone" value={profile.phone || "—"} />
 
-          <ProfileRowView label="Degree" value={profile.degree || "—"} />
-          <ProfileRowView label="Branch" value={profile.branch || "—"} />
-          <ProfileRowView
+          <Row label="Degree" value={profile.degree || "—"} />
+          <Row label="Branch" value={profile.branch || "—"} />
+          <Row
             label="Graduation Year"
             value={profile.graduation_year != null ? String(profile.graduation_year) : "—"}
           />
 
-          <ProfileRowView label="Company" value={profile.company || "—"} />
-          <ProfileRowView label="Job Role" value={profile.job_role || "—"} />
-          <ProfileRowView label="Location" value={profile.location || "—"} />
+          <Row label="Company" value={profile.company || "—"} />
+          <Row label="Job Role" value={profile.job_role || "—"} />
+          <Row label="Location" value={profile.location || "—"} />
 
-          <ProfileRowView
+          <Row
             label="LinkedIn"
             value={
               profile.linkedin ? (
@@ -127,7 +116,7 @@ export default async function DashboardPage() {
               )
             }
           />
-          <ProfileRowView
+          <Row
             label="Approval"
             value={
               moderationStatus === "approved"
@@ -140,7 +129,6 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* CTA: Directory access only when approved */}
       <div className="flex items-center gap-3">
         <Button asChild disabled={moderationStatus !== "approved"}>
           <Link href="/directory">Go to Directory</Link>
@@ -155,18 +143,10 @@ export default async function DashboardPage() {
   );
 }
 
-function ProfileRowView({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className="text-sm">{value}</span>
     </div>
   );
