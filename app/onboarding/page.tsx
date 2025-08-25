@@ -1,25 +1,50 @@
-// app/onboarding/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useForm, type SubmitHandler, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { onboardingSchema, type OnboardingForm } from "@/lib/validation/onboarding";
+import {
+  onboardingSchema,
+  type OnboardingForm,
+} from "@/lib/validation/onboarding";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from "@/components/ui/card";
+import {
+  Form,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormControl,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const supabase = supabaseBrowser();
   const [email, setEmail] = useState<string>("");
+
+  // Avatar local state (for upload + preview)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Prefill email (read-only display)
   useEffect(() => {
@@ -29,6 +54,22 @@ export default function OnboardingPage() {
       setEmail(data.user?.email ?? "");
     })();
   }, [supabase]);
+
+  // Manage preview URL lifecycle
+  useEffect(() => {
+    if (!avatarFile) {
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+      setAvatarPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(avatarFile);
+    setAvatarPreview(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [avatarFile]);
 
   const resolver = zodResolver(onboardingSchema) as unknown as Resolver<OnboardingForm>;
   const form = useForm<OnboardingForm>({
@@ -57,9 +98,60 @@ export default function OnboardingPage() {
     []
   );
   const branchOptions = useMemo(
-    () => ["CSE", "ECE", "EEE", "IT", "Mechanical", "Civil", "Chemical", "AI/ML", "Data Science", "Other"],
+    () => [
+      "CSE",
+      "ECE",
+      "EEE",
+      "IT",
+      "Mechanical",
+      "Civil",
+      "Chemical",
+      "AI/ML",
+      "Data Science",
+      "Other",
+    ],
     []
   );
+
+  async function uploadAvatarOrReturnUrl(
+    file: File | null,
+    userId: string
+  ): Promise<string | null> {
+    if (!file) return null;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file.");
+      return null;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image too large (max 5MB).");
+      return null;
+    }
+
+    try {
+      setIsUploading(true);
+      const path = `profiles/${userId}/${Date.now()}-${file.name}`;
+
+      const { data, error } = await supabase
+        .storage
+        .from("avatars")
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: true,
+        });
+
+      if (error) throw error;
+
+      const { data: pub } = supabase.storage.from("avatars").getPublicUrl(data.path);
+      return pub.publicUrl;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to upload avatar";
+      toast.error(msg);
+      return null;
+    } finally {
+      setIsUploading(false);
+    }
+  }
 
   const onSubmit: SubmitHandler<OnboardingForm> = async (values) => {
     const {
@@ -72,6 +164,14 @@ export default function OnboardingPage() {
       return;
     }
 
+    // Upload avatar if provided
+    if (avatarFile) {
+      const publicUrl = await uploadAvatarOrReturnUrl(avatarFile, user.id);
+      if (publicUrl) {
+        values.avatar_url = publicUrl;
+      }
+    }
+
     const { error } = await supabase.from("profiles").upsert({
       id: user.id,
       email: user.email ?? null,
@@ -80,7 +180,6 @@ export default function OnboardingPage() {
       degree: values.degree.trim(),
       branch: values.branch.trim(),
       onboarded: true,
-      // explicitly mark pending for admin review (even though DB has a default)
       moderation_status: "pending",
     });
 
@@ -93,8 +192,8 @@ export default function OnboardingPage() {
     router.push("/dashboard");
   };
 
-  // 🔧 Use 'watch' so the button state updates live
-  const w = form.watch(); // subscribes to all fields; causes re-render on change
+  // Live gating for submit button
+  const w = form.watch();
   const requiredIncomplete =
     !w.full_name?.trim() ||
     !w.degree?.trim() ||
@@ -104,6 +203,12 @@ export default function OnboardingPage() {
     !w.consent_privacy;
 
   const isSaving = form.formState.isSubmitting;
+
+  const handleRemoveAvatar = () => {
+    setAvatarFile(null);
+    // Keep preview state cleanup in effect hook
+    form.setValue("avatar_url", ""); // ensures we don’t keep a stale URL
+  };
 
   return (
     <div className="flex justify-center mt-12">
@@ -288,19 +393,39 @@ export default function OnboardingPage() {
                 )}
               />
 
-              {/* Avatar URL */}
-              <FormField
-                control={form.control}
-                name="avatar_url"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Avatar URL</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://..." {...field} />
-                    </FormControl>
-                  </FormItem>
+              {/* Avatar (file uploader → Storage) + Preview + Remove */}
+              <div className="space-y-2">
+                <FormLabel>Profile Photo (optional)</FormLabel>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setAvatarFile(f);
+                  }}
+                />
+                {avatarPreview ? (
+                  <div className="flex items-center gap-3">
+                    {/* Use <img> for blob: URL to avoid next/image domain config */}
+                    <img
+                      src={avatarPreview}
+                      alt="Avatar preview"
+                      className="h-16 w-16 rounded-full object-cover border"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRemoveAvatar}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    You can upload a square image for best results. Max 5MB.
+                  </p>
                 )}
-              />
+              </div>
 
               {/* Consents */}
               <FormField
@@ -337,9 +462,9 @@ export default function OnboardingPage() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={requiredIncomplete || isSaving}
+                disabled={requiredIncomplete || isSaving || isUploading}
               >
-                {isSaving ? "Saving..." : "Complete Onboarding"}
+                {isUploading ? "Uploading..." : isSaving ? "Saving..." : "Complete Onboarding"}
               </Button>
             </form>
           </Form>
